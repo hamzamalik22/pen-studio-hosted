@@ -216,7 +216,7 @@
       let currentZoom = 1;
       let showGrid = false;
       let snapToGrid = false;
-      let gridSize = 10;
+      let gridSize = 20;
 
       // Alignment & snapping guides
       const SNAP_THRESHOLD = 6;
@@ -293,6 +293,13 @@
         canvas.on('object:removed', (e) => { if (e.target?.objectId !== 'background_layer') saveHistory(); });
         canvas.on('object:moving', handleObjectMoving);
         canvas.on('mouse:up', () => clearGuides());
+        
+        // Draw grid overlay after each render
+        canvas.on('after:render', () => {
+          if (showGrid) {
+            drawGrid();
+          }
+        });
       }
 
       function createBackground(color) {
@@ -1053,9 +1060,69 @@
       // GRID & SNAPPING
       // =====================
 
+      function drawGrid() {
+        if (!canvas || !showGrid) return;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        const zoom = canvas.getZoom();
+        const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+        const w = canvas.getWidth();
+        const h = canvas.getHeight();
+        
+        ctx.save();
+        
+        const scaledGridSize = gridSize * zoom;
+        if (scaledGridSize < 4) {
+          ctx.restore();
+          return; // Grid too small to draw
+        }
+        
+        const offsetX = vpt[4] % scaledGridSize;
+        const offsetY = vpt[5] % scaledGridSize;
+        
+        // Draw minor grid lines
+        ctx.strokeStyle = 'rgba(100, 100, 150, 0.25)';
+        ctx.lineWidth = 1;
+        
+        ctx.beginPath();
+        // Draw vertical lines
+        for (let x = offsetX; x <= w; x += scaledGridSize) {
+          ctx.moveTo(Math.round(x) + 0.5, 0);
+          ctx.lineTo(Math.round(x) + 0.5, h);
+        }
+        // Draw horizontal lines
+        for (let y = offsetY; y <= h; y += scaledGridSize) {
+          ctx.moveTo(0, Math.round(y) + 0.5);
+          ctx.lineTo(w, Math.round(y) + 0.5);
+        }
+        ctx.stroke();
+        
+        // Draw major grid lines (every 5 cells)
+        ctx.strokeStyle = 'rgba(100, 100, 180, 0.5)';
+        ctx.lineWidth = 1;
+        const majorGridSize = scaledGridSize * 5;
+        
+        ctx.beginPath();
+        for (let x = offsetX; x <= w; x += majorGridSize) {
+          ctx.moveTo(Math.round(x) + 0.5, 0);
+          ctx.lineTo(Math.round(x) + 0.5, h);
+        }
+        for (let y = offsetY; y <= h; y += majorGridSize) {
+          ctx.moveTo(0, Math.round(y) + 0.5);
+          ctx.lineTo(w, Math.round(y) + 0.5);
+        }
+        ctx.stroke();
+        
+        ctx.restore();
+      }
+
       function toggleGrid(show) {
         showGrid = show;
-        // Grid is rendered as overlay - no canvas object needed
+        if (canvas) {
+          canvas.renderAll();
+        }
         sendToRN({ type: 'GRID_TOGGLED', payload: { show: showGrid } });
       }
 
@@ -1066,6 +1133,9 @@
 
       function setGridSize(size) {
         gridSize = size;
+        if (showGrid && canvas) {
+          canvas.renderAll();
+        }
       }
 
       function clearGuides() {
