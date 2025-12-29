@@ -362,15 +362,16 @@
           ...options 
         };
 
+        // Only support 4 basic shapes matching website: rectangle, circle, triangle, line
         switch (type) {
           case 'rectangle':
             shape = new fabric.Rect({ 
               ...defaults, 
               width: options.width || 100, 
               height: options.height || 80, 
-              fill: options.fill !== undefined ? options.fill : '#3b82f6',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
+              fill: options.fill !== undefined ? options.fill : '#ffffff',
+              stroke: options.stroke || '#000000',
+              strokeWidth: options.strokeWidth || 1,
               rx: options.rx || 0,
               ry: options.ry || 0,
             });
@@ -379,9 +380,9 @@
             shape = new fabric.Circle({ 
               ...defaults, 
               radius: options.radius || 50, 
-              fill: options.fill !== undefined ? options.fill : '#10b981',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
+              fill: options.fill !== undefined ? options.fill : '#ffffff',
+              stroke: options.stroke || '#000000',
+              strokeWidth: options.strokeWidth || 1,
             });
             break;
           case 'triangle':
@@ -389,9 +390,9 @@
               ...defaults, 
               width: options.width || 100, 
               height: options.height || 87, 
-              fill: options.fill !== undefined ? options.fill : '#f59e0b',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
+              fill: options.fill !== undefined ? options.fill : '#ffffff',
+              stroke: options.stroke || '#000000',
+              strokeWidth: options.strokeWidth || 1,
             });
             break;
           case 'line':
@@ -402,70 +403,9 @@
               strokeLineCap: 'round',
             });
             break;
-          case 'ellipse':
-            shape = new fabric.Ellipse({ 
-              ...defaults, 
-              rx: options.rx || 60, 
-              ry: options.ry || 40, 
-              fill: options.fill !== undefined ? options.fill : '#8b5cf6',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
-            });
-            break;
-          case 'polygon':
-            const sides = options.sides || 6;
-            const radius = options.radius || 50;
-            const polyPts = [];
-            for (let i = 0; i < sides; i++) {
-              const a = (2 * Math.PI / sides) * i - Math.PI / 2;
-              polyPts.push({ x: radius * Math.cos(a), y: radius * Math.sin(a) });
-            }
-            shape = new fabric.Polygon(polyPts, { 
-              ...defaults, 
-              fill: options.fill !== undefined ? options.fill : '#ec4899',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
-            });
-            break;
-          case 'star':
-            const starPts = [];
-            const outerR = options.outerRadius || 50;
-            const innerR = options.innerRadius || 25;
-            const points = options.points || 5;
-            for (let i = 0; i < points * 2; i++) {
-              const r = i % 2 === 0 ? outerR : innerR;
-              const a = (Math.PI / points) * i - Math.PI / 2;
-              starPts.push({ x: r * Math.cos(a), y: r * Math.sin(a) });
-            }
-            shape = new fabric.Polygon(starPts, { 
-              ...defaults, 
-              fill: options.fill !== undefined ? options.fill : '#fbbf24',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
-            });
-            break;
-          case 'arrow':
-            const arrowPath = 'M10,30 L50,30 L50,15 L80,50 L50,85 L50,70 L10,70 Z';
-            shape = new fabric.Path(arrowPath, { 
-              ...defaults, 
-              fill: options.fill !== undefined ? options.fill : '#3b82f6',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
-            });
-            break;
-          case 'rounded-rect':
-            shape = new fabric.Rect({ 
-              ...defaults, 
-              width: options.width || 100, 
-              height: options.height || 80, 
-              rx: options.rx || 15, 
-              ry: options.ry || 15, 
-              fill: options.fill !== undefined ? options.fill : '#60a5fa',
-              stroke: options.stroke || null,
-              strokeWidth: options.strokeWidth || 0,
-            });
-            break;
-          default: return;
+          default: 
+            console.warn('Unsupported shape type:', type);
+            return;
         }
 
         shape.objectId = 'shape_' + Date.now();
