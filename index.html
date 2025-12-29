@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ghetch PenStudio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Open+Sans:wght@300;400;500;600;700&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&family=Work+Sans:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #1a1a2e;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .light-theme {
+      background: #e5e7eb;
+    }
+    .light-theme #canvas-container {
+      background: #e5e7eb;
+    }
+    .light-theme #canvas-wrapper {
+      background: #ffffff;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      touch-action: none;
+      margin: 0;
+      padding: 20px 0;
+      box-sizing: border-box;
+      background: #1a1a2e;
+    }
+
+    #canvas-wrapper {
+      position: relative;
+      background: #ffffff;
+      width: 100%;
+      border-radius: 0;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+    }
+
+    #canvas-wrapper.transparent-bg {
+      background-image: 
+        linear-gradient(45deg, #d1d5db 25%, transparent 25%),
+        linear-gradient(-45deg, #d1d5db 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #d1d5db 75%),
+        linear-gradient(-45deg, transparent 75%, #d1d5db 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    }
+
+    canvas { display: block; }
+
+    #loading {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      transition: opacity 0.3s ease;
+    }
+
+    #loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255,255,255,0.2);
+      border-top-color: #7c3aed;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    #status {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #a0a0a0;
+    }
+
+    .error {
+      color: #ef4444 !important;
+      text-align: center;
+      padding: 0 20px;
+    }
+
+    /* Grid overlay */
+    .grid-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      opacity: 0.3;
+      display: none;
+    }
+
+    .grid-overlay.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div id="status">Initializing PenStudio...</div>
+  </div>
+  
+  <div id="canvas-container">
+    <div id="canvas-wrapper">
+      <canvas id="pen-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Load Fabric.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  
+  <script>
+    (function() {
+      'use strict';
+
+      const statusEl = document.getElementById('status');
+      const loadingEl = document.getElementById('loading');
+
+      function updateStatus(msg, isError) {
+        statusEl.textContent = msg;
+        if (isError) statusEl.classList.add('error');
+        sendToRN({ type: 'STATUS', payload: { message: msg, isError } });
+      }
+
+      // Check if Fabric loaded
+      if (typeof fabric === 'undefined') {
+        updateStatus('Failed to load Fabric.js library', true);
+        sendToRN({ type: 'LOAD_ERROR', payload: { error: 'Fabric.js not loaded' } });
+        return;
+      }
+
+      updateStatus('Library loaded, loading fonts...');
+
+      // Preload fonts for Fabric.js
+      const fontFamilies = [
+        'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 
+        'Poppins', 'Work Sans', 'Source Sans Pro',
+        'Arial', 'Helvetica', 'Georgia', 'Times New Roman', 
+        'Courier New', 'Verdana', 'Impact', 'Comic Sans MS'
+      ];
+
+      function preloadFonts() {
+        return new Promise((resolve) => {
+          const testEl = document.createElement('div');
+          testEl.style.position = 'absolute';
+          testEl.style.visibility = 'hidden';
+          testEl.style.fontSize = '12px';
+          document.body.appendChild(testEl);
+          
+          function checkFont(font) {
+            return new Promise((fontResolve) => {
+              testEl.style.fontFamily = font;
+              if (document.fonts && document.fonts.check) {
+                const fontName = font.includes(' ') ? `"${font}"` : font;
+                if (document.fonts.check(`12px ${fontName}`)) {
+                  fontResolve(true);
+                  return;
+                }
+              }
+              setTimeout(() => fontResolve(true), 100);
+            });
+          }
+          
+          Promise.all(fontFamilies.map(checkFont)).then(() => {
+            document.body.removeChild(testEl);
+            setTimeout(resolve, 300);
+          });
+        });
+      }
+
+      let canvas = null;
+      let historyStack = [];
+      let historyIndex = -1;
+      const MAX_HISTORY = 50;
+      let backgroundRect = null;
+      let canvasWidth = 280;
+      let canvasHeight = 280;
+      let currentZoom = 1;
+      let showGrid = false;
+      let snapToGrid = false;
+      let gridSize = 10;
+
+      // Alignment & snapping guides
+      const SNAP_THRESHOLD = 6;
+      let hGuideLines = [];
+      let vGuideLines = [];
+
+      // Drawing tools state
+      let drawToolActive = false;
+      let drawToolColor = '#000000';
+      let drawToolWidth = 5;
+
+      // Frame/Artboard support
+      let frames = [];
+      let activeFrame = null;
+
+      // Pages support
+      let pages = [{ id: 'page_1', name: 'Page 1', objects: [] }];
+      let currentPageIndex = 0;
+
+      function initCanvas() {
+        try {
+          const container = document.getElementById('canvas-container');
+          const wrapper = document.getElementById('canvas-wrapper');
+          
+          const containerWidth = container.clientWidth;
+          const containerHeight = container.clientHeight;
+          
+          const verticalPadding = 40;
+          const availableHeight = containerHeight - verticalPadding;
+          
+          canvasWidth = containerWidth;
+          canvasHeight = Math.min(canvasWidth, availableHeight);
+          
+          if (canvasHeight >= containerHeight) {
+            canvasHeight = containerHeight - verticalPadding;
+            canvasWidth = canvasHeight;
+          }
+
+          wrapper.style.width = '100%';
+          wrapper.style.height = canvasHeight + 'px';
+          wrapper.style.maxHeight = availableHeight + 'px';
+
+          canvas = new fabric.Canvas('pen-canvas', {
+            width: canvasWidth,
+            height: canvasHeight,
+            backgroundColor: '#ffffff',
+            selection: true,
+            preserveObjectStacking: true,
+          });
+
+          setupEventListeners();
+          createBackground('#ffffff');
+          saveHistory();
+
+          loadingEl.classList.add('hidden');
+          sendToRN({ type: 'CANVAS_READY', payload: { width: canvasWidth, height: canvasHeight } });
+          
+        } catch (error) {
+          updateStatus('Error: ' + error.message, true);
+          sendToRN({ type: 'LOAD_ERROR', payload: { error: error.message } });
+        }
+      }
+
+      function setupEventListeners() {
+        canvas.on('selection:created', handleSelection);
+        canvas.on('selection:updated', handleSelection);
+        canvas.on('selection:cleared', () => sendToRN({ type: 'SELECTION_CLEARED' }));
+        canvas.on('object:modified', () => { 
+          clearGuides();
+          saveHistory(); 
+          sendSelectionUpdate(); 
+        });
+        canvas.on('object:added', (e) => { if (e.target?.objectId !== 'background_layer') saveHistory(); });
+        canvas.on('object:removed', (e) => { if (e.target?.objectId !== 'background_layer') saveHistory(); });
+        canvas.on('object:moving', handleObjectMoving);
+        canvas.on('mouse:up', () => clearGuides());
+      }
+
+      function createBackground(color) {
+        if (backgroundRect) canvas.remove(backgroundRect);
+        const wrapper = document.getElementById('canvas-wrapper');
+
+        if (color === 'transparent') {
+          wrapper.classList.add('transparent-bg');
+          canvas.backgroundColor = 'transparent';
+          backgroundRect = null;
+        } else {
+          wrapper.classList.remove('transparent-bg');
+          backgroundRect = new fabric.Rect({
+            left: 0, top: 0,
+            width: canvasWidth, height: canvasHeight,
+            fill: color,
+            selectable: false, evented: false,
+            objectId: 'background_layer',
+          });
+          canvas.add(backgroundRect);
+          backgroundRect.sendToBack();
+          canvas.backgroundColor = '#ffffff';
+        }
+        canvas.renderAll();
+      }
+
+      function clearCanvas() {
+        if (!canvas) return;
+        
+        if (drawToolActive) {
+          deactivateDrawTool();
+        }
+        
+        const objects = canvas.getObjects().filter(obj => obj.objectId !== 'background_layer');
+        objects.forEach(obj => canvas.remove(obj));
+        
+        canvas.discardActiveObject();
+        
+        historyStack = [];
+        historyIndex = -1;
+        
+        canvas.renderAll();
+        saveHistory();
+        sendToRN({ type: 'SELECTION_CLEARED' });
+        sendToRN({ type: 'HISTORY_STATE', payload: { canUndo: false, canRedo: false } });
+      }
+
+      // =====================
+      // SHAPE FUNCTIONS
+      // =====================
+
+      function addShape(type, options = {}) {
+        let shape;
+        const cx = canvasWidth / 2, cy = canvasHeight / 2;
+        const defaults = { 
+          left: cx, 
+          top: cy, 
+          originX: 'center', 
+          originY: 'center',
+          ...options 
+        };
+
+        switch (type) {
+          case 'rectangle':
+            shape = new fabric.Rect({ 
+              ...defaults, 
+              width: options.width || 100, 
+              height: options.height || 80, 
+              fill: options.fill !== undefined ? options.fill : '#3b82f6',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+              rx: options.rx || 0,
+              ry: options.ry || 0,
+            });
+            break;
+          case 'circle':
+            shape = new fabric.Circle({ 
+              ...defaults, 
+              radius: options.radius || 50, 
+              fill: options.fill !== undefined ? options.fill : '#10b981',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          case 'triangle':
+            shape = new fabric.Triangle({ 
+              ...defaults, 
+              width: options.width || 100, 
+              height: options.height || 87, 
+              fill: options.fill !== undefined ? options.fill : '#f59e0b',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          case 'line':
+            const lineLength = options.length || 100;
+            shape = new fabric.Line([cx - lineLength/2, cy, cx + lineLength/2, cy], { 
+              stroke: options.stroke || '#000000', 
+              strokeWidth: options.strokeWidth || 3,
+              strokeLineCap: 'round',
+            });
+            break;
+          case 'ellipse':
+            shape = new fabric.Ellipse({ 
+              ...defaults, 
+              rx: options.rx || 60, 
+              ry: options.ry || 40, 
+              fill: options.fill !== undefined ? options.fill : '#8b5cf6',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          case 'polygon':
+            const sides = options.sides || 6;
+            const radius = options.radius || 50;
+            const polyPts = [];
+            for (let i = 0; i < sides; i++) {
+              const a = (2 * Math.PI / sides) * i - Math.PI / 2;
+              polyPts.push({ x: radius * Math.cos(a), y: radius * Math.sin(a) });
+            }
+            shape = new fabric.Polygon(polyPts, { 
+              ...defaults, 
+              fill: options.fill !== undefined ? options.fill : '#ec4899',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          case 'star':
+            const starPts = [];
+            const outerR = options.outerRadius || 50;
+            const innerR = options.innerRadius || 25;
+            const points = options.points || 5;
+            for (let i = 0; i < points * 2; i++) {
+              const r = i % 2 === 0 ? outerR : innerR;
+              const a = (Math.PI / points) * i - Math.PI / 2;
+              starPts.push({ x: r * Math.cos(a), y: r * Math.sin(a) });
+            }
+            shape = new fabric.Polygon(starPts, { 
+              ...defaults, 
+              fill: options.fill !== undefined ? options.fill : '#fbbf24',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          case 'arrow':
+            const arrowPath = 'M10,30 L50,30 L50,15 L80,50 L50,85 L50,70 L10,70 Z';
+            shape = new fabric.Path(arrowPath, { 
+              ...defaults, 
+              fill: options.fill !== undefined ? options.fill : '#3b82f6',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          case 'rounded-rect':
+            shape = new fabric.Rect({ 
+              ...defaults, 
+              width: options.width || 100, 
+              height: options.height || 80, 
+              rx: options.rx || 15, 
+              ry: options.ry || 15, 
+              fill: options.fill !== undefined ? options.fill : '#60a5fa',
+              stroke: options.stroke || null,
+              strokeWidth: options.strokeWidth || 0,
+            });
+            break;
+          default: return;
+        }
+
+        shape.objectId = 'shape_' + Date.now();
+        shape.set({
+          cornerColor: '#7c3aed', 
+          cornerStrokeColor: '#7c3aed', 
+          borderColor: '#7c3aed',
+          cornerSize: 10, 
+          cornerStyle: 'circle', 
+          transparentCorners: false, 
+          borderScaleFactor: 2,
+        });
+        canvas.add(shape);
+        canvas.setActiveObject(shape);
+        canvas.renderAll();
+        sendToRN({ type: 'OBJECT_ADDED', payload: getObjectInfo(shape) });
+      }
+
+      // =====================
+      // TEXT FUNCTIONS
+      // =====================
+
+      function normalizeFontFamily(fontFamily) {
+        if (!fontFamily) return 'Arial';
+        return fontFamily;
+      }
+
+      function addText(text, options = {}) {
+        const fontFamily = normalizeFontFamily(options.fontFamily || 'Inter');
+        const textObj = new fabric.IText(text || 'Your Text', {
+          left: canvasWidth / 2, top: canvasHeight / 2,
+          originX: 'center', originY: 'center',
+          fontSize: options.fontSize || 32,
+          fontFamily: fontFamily,
+          fontWeight: options.fontWeight || 'normal',
+          fontStyle: options.fontStyle || 'normal',
+          fill: options.fill || '#000000',
+          textAlign: options.textAlign || 'left',
+          lineHeight: options.lineHeight || 1.2,
+          charSpacing: options.charSpacing || 0,
+          underline: options.underline || false,
+          linethrough: options.linethrough || false,
+          objectId: 'text_' + Date.now(),
+          cornerColor: '#7c3aed', 
+          cornerStrokeColor: '#7c3aed', 
+          borderColor: '#7c3aed',
+          cornerSize: 10, 
+          cornerStyle: 'circle', 
+          transparentCorners: false,
+        });
+        canvas.add(textObj);
+        canvas.setActiveObject(textObj);
+        canvas.renderAll();
+        sendToRN({ type: 'OBJECT_ADDED', payload: getObjectInfo(textObj) });
+      }
+
+      // =====================
+      // IMAGE FUNCTIONS
+      // =====================
+
+      function addImage(dataUrl, options = {}) {
+        if (!dataUrl) return;
+        try {
+          fabric.Image.fromURL(
+            dataUrl,
+            (img) => {
+              if (!img) return;
+
+              const maxW = Math.max(50, canvasWidth * 0.7);
+              const maxH = Math.max(50, canvasHeight * 0.7);
+              const iw = img.width || 1;
+              const ih = img.height || 1;
+              const scale = Math.min(maxW / iw, maxH / ih, 1);
+
+              img.set({
+                left: canvasWidth / 2,
+                top: canvasHeight / 2,
+                originX: 'center',
+                originY: 'center',
+                scaleX: scale,
+                scaleY: scale,
+                objectId: 'image_' + Date.now(),
+                ...options,
+                cornerColor: '#7c3aed',
+                cornerStrokeColor: '#7c3aed',
+                borderColor: '#7c3aed',
+                cornerSize: 10,
+                cornerStyle: 'circle',
+                transparentCorners: false,
+              });
+
+              canvas.add(img);
+              canvas.setActiveObject(img);
+              canvas.renderAll();
+              saveHistory();
+              sendToRN({ type: 'OBJECT_ADDED', payload: getObjectInfo(img) });
+            },
+            { crossOrigin: 'anonymous' }
+          );
+        } catch (e) {
+          sendToRN({ type: 'CONSOLE_ERROR', payload: { message: 'addImage failed: ' + (e?.message || String(e)) } });
+        }
+      }
+
+      function addSVG(svgString) {
+        fabric.loadSVGFromString(svgString, (objects, opts) => {
+          const group = fabric.util.groupSVGElements(objects, opts);
+          const scale = Math.min(100 / group.width, 100 / group.height);
+          group.set({
+            left: canvasWidth / 2, top: canvasHeight / 2,
+            originX: 'center', originY: 'center',
+            scaleX: scale, scaleY: scale,
+            objectId: 'svg_' + Date.now(),
+            cornerColor: '#7c3aed', 
+            cornerStrokeColor: '#7c3aed', 
+            borderColor: '#7c3aed',
+            cornerSize: 10, 
+            cornerStyle: 'circle', 
+            transparentCorners: false,
+          });
+          canvas.add(group);
+          canvas.setActiveObject(group);
+          canvas.renderAll();
+          sendToRN({ type: 'OBJECT_ADDED', payload: getObjectInfo(group) });
+        });
+      }
+
+      // =====================
+      // FRAME/ARTBOARD FUNCTIONS
+      // =====================
+
+      function addFrame(options = {}) {
+        const frameWidth = options.width || 375; // iPhone width
+        const frameHeight = options.height || 667; // iPhone height
+        const frameName = options.name || 'Frame ' + (frames.length + 1);
+        
+        // Create frame as a rectangle with special properties
+        const frame = new fabric.Rect({
+          left: options.left || canvasWidth / 2,
+          top: options.top || canvasHeight / 2,
+          originX: 'center',
+          originY: 'center',
+          width: frameWidth,
+          height: frameHeight,
+          fill: options.fill || '#ffffff',
+          stroke: '#7c3aed',
+          strokeWidth: 1,
+          strokeDashArray: [5, 5],
+          objectId: 'frame_' + Date.now(),
+          isFrame: true,
+          frameName: frameName,
+          cornerColor: '#7c3aed',
+          cornerStrokeColor: '#7c3aed',
+          borderColor: '#7c3aed',
+          cornerSize: 10,
+          cornerStyle: 'circle',
+          transparentCorners: false,
+        });
+
+        frames.push({
+          id: frame.objectId,
+          name: frameName,
+          width: frameWidth,
+          height: frameHeight,
+          children: [],
+        });
+
+        canvas.add(frame);
+        frame.sendToBack();
+        if (backgroundRect) backgroundRect.sendToBack();
+        canvas.setActiveObject(frame);
+        canvas.renderAll();
+        saveHistory();
+        sendToRN({ type: 'FRAME_ADDED', payload: { id: frame.objectId, name: frameName } });
+        sendToRN({ type: 'OBJECT_ADDED', payload: getObjectInfo(frame) });
+      }
+
+      // Device presets for frames
+      const devicePresets = {
+        'iphone-14': { width: 390, height: 844, name: 'iPhone 14' },
+        'iphone-14-pro-max': { width: 430, height: 932, name: 'iPhone 14 Pro Max' },
+        'iphone-se': { width: 375, height: 667, name: 'iPhone SE' },
+        'android-small': { width: 360, height: 640, name: 'Android Small' },
+        'android-medium': { width: 412, height: 915, name: 'Android Medium' },
+        'android-large': { width: 480, height: 853, name: 'Android Large' },
+        'ipad': { width: 768, height: 1024, name: 'iPad' },
+        'ipad-pro': { width: 1024, height: 1366, name: 'iPad Pro' },
+        'desktop': { width: 1440, height: 900, name: 'Desktop' },
+        'tablet': { width: 834, height: 1194, name: 'Tablet' },
+      };
+
+      function addFrameFromPreset(presetName) {
+        const preset = devicePresets[presetName];
+        if (preset) {
+          addFrame({ 
+            width: preset.width, 
+            height: preset.height, 
+            name: preset.name 
+          });
+        }
+      }
+
+      // =====================
+      // UPDATE FUNCTIONS
+      // =====================
+
+      function updateSelectedObject(prop, val) {
+        const obj = canvas.getActiveObject();
+        if (!obj) return;
+        if (prop === 'fontSize') val = parseInt(val);
+        else if (prop === 'strokeWidth') val = parseFloat(val);
+        else if (prop === 'opacity') val = parseFloat(val);
+        else if (prop === 'fontFamily') val = normalizeFontFamily(val);
+        
+        // Special handling for SVG groups
+        if ((prop === 'fill' || prop === 'stroke') && obj.type === 'group' && obj._objects) {
+          updateGroupColor(obj, val, prop);
+        } else {
+          obj.set(prop, val);
+        }
+        
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function updateGroupColor(group, color, property) {
+        if (!group) return;
+        
+        if (group.type === 'group' && group._objects) {
+          group._objects.forEach((obj) => {
+            if (obj.type === 'group') {
+              updateGroupColor(obj, color, property);
+            } else {
+              if (property === 'fill') {
+                obj.set('fill', color);
+              } else if (property === 'stroke') {
+                obj.set('stroke', color);
+              }
+            }
+          });
+        } else {
+          if (property === 'fill') {
+            group.set('fill', color);
+          } else if (property === 'stroke') {
+            group.set('stroke', color);
+          }
+        }
+      }
+
+      // =====================
+      // POSITION & TRANSFORM
+      // =====================
+
+      function nudgePosition(deltaX, deltaY) {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set({ 
+          left: obj.left + deltaX, 
+          top: obj.top + deltaY 
+        });
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function setScale(scaleX, scaleY) {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set({ 
+          scaleX: scaleX, 
+          scaleY: scaleY || scaleX 
+        });
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function rotateObject(angleDelta) {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set({ angle: (obj.angle || 0) + angleDelta });
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      // =====================
+      // ZOOM & PAN
+      // =====================
+
+      function setCanvasZoom(zoom) {
+        if (!canvas) return;
+        const clamped = Math.max(0.25, Math.min(5, zoom || 1));
+        const center = new fabric.Point(canvasWidth / 2, canvasHeight / 2);
+        canvas.zoomToPoint(center, clamped);
+        currentZoom = clamped;
+        canvas.renderAll();
+        sendToRN({ type: 'CANVAS_ZOOM', payload: { zoom: currentZoom } });
+      }
+
+      function zoomIn(step) {
+        const delta = typeof step === 'number' ? step : 0.1;
+        setCanvasZoom(currentZoom + delta);
+      }
+
+      function zoomOut(step) {
+        const delta = typeof step === 'number' ? step : 0.1;
+        setCanvasZoom(currentZoom - delta);
+      }
+
+      // =====================
+      // ALIGNMENT
+      // =====================
+
+      function alignCenterHorizontal() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        const center = obj.getCenterPoint();
+        const newCenter = new fabric.Point(canvasWidth / 2, center.y);
+        obj.setPositionByOrigin(newCenter, 'center', 'center');
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function alignCenterVertical() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        const center = obj.getCenterPoint();
+        const newCenter = new fabric.Point(center.x, canvasHeight / 2);
+        obj.setPositionByOrigin(newCenter, 'center', 'center');
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function alignLeft() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set({ left: 0 });
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function alignRight() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        const left = canvasWidth - obj.getScaledWidth();
+        obj.set({ left: left });
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function alignTop() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set({ top: 0 });
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function alignBottom() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        const top = canvasHeight - obj.getScaledHeight();
+        obj.set({ top: top });
+        obj.setCoords();
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      // =====================
+      // LAYER OPERATIONS
+      // =====================
+
+      function deleteSelected() {
+        canvas.getActiveObjects().forEach(obj => {
+          if (obj.objectId !== 'background_layer') canvas.remove(obj);
+        });
+        canvas.discardActiveObject();
+        canvas.renderAll();
+        saveHistory();
+        sendToRN({ type: 'SELECTION_CLEARED' });
+      }
+
+      function duplicateSelected() {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.clone(cloned => {
+          cloned.set({ 
+            left: obj.left + 20, 
+            top: obj.top + 20, 
+            objectId: obj.type + '_' + Date.now() 
+          });
+          canvas.add(cloned);
+          canvas.setActiveObject(cloned);
+          canvas.renderAll();
+          saveHistory();
+        });
+      }
+
+      function groupSelected() {
+        const activeObj = canvas.getActiveObject();
+        if (!activeObj) return;
+
+        if (activeObj.type === 'activeSelection') {
+          const group = activeObj.toGroup();
+          if (group) {
+            if (!group.objectId) {
+              group.objectId = 'group_' + Date.now();
+            }
+            if (backgroundRect) {
+              backgroundRect.sendToBack();
+            }
+            canvas.renderAll();
+            saveHistory();
+            sendSelectionUpdate();
+          }
+        }
+      }
+
+      function ungroupSelected() {
+        const activeObj = canvas.getActiveObject();
+        if (!activeObj || activeObj.type !== 'group') return;
+
+        const selection = activeObj.toActiveSelection();
+        if (selection) {
+          if (backgroundRect) {
+            backgroundRect.sendToBack();
+          }
+          canvas.renderAll();
+          saveHistory();
+          sendSelectionUpdate();
+        }
+      }
+
+      function bringForward() { 
+        const o = canvas.getActiveObject(); 
+        if (o) { 
+          o.bringForward(); 
+          canvas.renderAll(); 
+          saveHistory(); 
+        } 
+      }
+
+      function sendBackward() {
+        const o = canvas.getActiveObject();
+        if (o) {
+          const objs = canvas.getObjects();
+          const bgIdx = objs.findIndex(x => x.objectId === 'background_layer');
+          if (objs.indexOf(o) > bgIdx + 1) { 
+            o.sendBackwards(); 
+            canvas.renderAll(); 
+            saveHistory(); 
+          }
+        }
+      }
+
+      function bringToFront() { 
+        const o = canvas.getActiveObject(); 
+        if (o) { 
+          o.bringToFront(); 
+          canvas.renderAll(); 
+          saveHistory(); 
+        } 
+      }
+
+      function sendToBack() {
+        const o = canvas.getActiveObject();
+        if (o) {
+          o.sendToBack();
+          if (backgroundRect) backgroundRect.sendToBack();
+          canvas.renderAll();
+          saveHistory();
+        }
+      }
+
+      function lockObject(lock) {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set({
+          selectable: !lock,
+          evented: !lock,
+          lockMovementX: lock,
+          lockMovementY: lock,
+          lockRotation: lock,
+          lockScalingX: lock,
+          lockScalingY: lock,
+        });
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      function setObjectVisibility(visible) {
+        const obj = canvas.getActiveObject();
+        if (!obj || obj.objectId === 'background_layer') return;
+        obj.set('visible', visible);
+        canvas.renderAll();
+        saveHistory();
+        sendSelectionUpdate();
+      }
+
+      // =====================
+      // DRAWING TOOL
+      // =====================
+
+      function activateDrawTool() {
+        if (!canvas) return;
+        drawToolActive = true;
+        canvas.isDrawingMode = true;
+        
+        if (!canvas.freeDrawingBrush) {
+          canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+        }
+        
+        canvas.freeDrawingBrush.width = drawToolWidth;
+        canvas.freeDrawingBrush.color = drawToolColor;
+        
+        canvas.selection = false;
+        canvas.forEachObject((obj) => {
+          if (obj.objectId !== 'background_layer') {
+            obj.selectable = false;
+            obj.evented = false;
+          }
+        });
+        
+        canvas.off('path:created');
+        canvas.on('path:created', function(e) {
+          const path = e.path;
+          path.set({
+            objectId: 'draw_path_' + Date.now(),
+            selectable: true,
+            evented: true,
+            cornerColor: '#7c3aed',
+            cornerStrokeColor: '#7c3aed',
+            borderColor: '#7c3aed',
+            cornerSize: 10,
+            cornerStyle: 'circle',
+            transparentCorners: false,
+          });
+          canvas.renderAll();
+          saveHistory();
+          sendToRN({ type: 'OBJECT_ADDED', payload: getObjectInfo(path) });
+        });
+        
+        canvas.renderAll();
+      }
+
+      function deactivateDrawTool() {
+        if (!canvas) return;
+        drawToolActive = false;
+        canvas.isDrawingMode = false;
+        canvas.selection = true;
+        canvas.forEachObject((obj) => {
+          if (obj.objectId !== 'background_layer') {
+            obj.selectable = true;
+            obj.evented = true;
+          }
+        });
+        canvas.off('path:created');
+        canvas.renderAll();
+      }
+
+      function setDrawToolColor(color) {
+        drawToolColor = color;
+        if (canvas && canvas.freeDrawingBrush) {
+          canvas.freeDrawingBrush.color = color;
+        }
+      }
+
+      function setDrawToolWidth(width) {
+        drawToolWidth = width;
+        if (canvas && canvas.freeDrawingBrush) {
+          canvas.freeDrawingBrush.width = width;
+        }
+      }
+
+      // =====================
+      // GRID & SNAPPING
+      // =====================
+
+      function toggleGrid(show) {
+        showGrid = show;
+        // Grid is rendered as overlay - no canvas object needed
+        sendToRN({ type: 'GRID_TOGGLED', payload: { show: showGrid } });
+      }
+
+      function toggleSnapToGrid(snap) {
+        snapToGrid = snap;
+        sendToRN({ type: 'SNAP_TOGGLED', payload: { snap: snapToGrid } });
+      }
+
+      function setGridSize(size) {
+        gridSize = size;
+      }
+
+      function clearGuides() {
+        if (!canvas) return;
+        const toRemove = canvas.getObjects().filter(o => o.isGuideLine);
+        toRemove.forEach(o => canvas.remove(o));
+        hGuideLines = [];
+        vGuideLines = [];
+        canvas.renderAll();
+      }
+
+      function addGuideLine(x1, y1, x2, y2, isVertical) {
+        const line = new fabric.Line([x1, y1, x2, y2], {
+          stroke: '#7c3aed',
+          strokeWidth: 1,
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          opacity: 0.6,
+          strokeDashArray: [4, 4],
+          isGuideLine: true,
+        });
+        canvas.add(line);
+        if (isVertical) vGuideLines.push(line);
+        else hGuideLines.push(line);
+      }
+
+      function handleObjectMoving(e) {
+        const target = e.target;
+        if (!target || target.objectId === 'background_layer') return;
+
+        clearGuides();
+
+        const center = target.getCenterPoint();
+        let snapX = center.x;
+        let snapY = center.y;
+
+        // Snap to grid if enabled
+        if (snapToGrid) {
+          snapX = Math.round(snapX / gridSize) * gridSize;
+          snapY = Math.round(snapY / gridSize) * gridSize;
+        }
+
+        const canvasCenterX = canvasWidth / 2;
+        const canvasCenterY = canvasHeight / 2;
+
+        // Snap to canvas center
+        if (Math.abs(center.x - canvasCenterX) < SNAP_THRESHOLD) {
+          snapX = canvasCenterX;
+          addGuideLine(canvasCenterX, 0, canvasCenterX, canvasHeight, true);
+        }
+        if (Math.abs(center.y - canvasCenterY) < SNAP_THRESHOLD) {
+          snapY = canvasCenterY;
+          addGuideLine(0, canvasCenterY, canvasWidth, canvasCenterY, false);
+        }
+
+        // Snap to other object centers
+        const objects = canvas.getObjects().filter(o => 
+          o !== target && 
+          o.objectId !== 'background_layer' && 
+          !o.isGuideLine
+        );
+
+        objects.forEach(obj => {
+          const c = obj.getCenterPoint();
+
+          if (Math.abs(center.x - c.x) < SNAP_THRESHOLD) {
+            snapX = c.x;
+            addGuideLine(c.x, 0, c.x, canvasHeight, true);
+          }
+          if (Math.abs(center.y - c.y) < SNAP_THRESHOLD) {
+            snapY = c.y;
+            addGuideLine(0, c.y, canvasWidth, c.y, false);
+          }
+        });
+
+        if (snapX !== center.x || snapY !== center.y) {
+          target.setPositionByOrigin(
+            new fabric.Point(snapX, snapY),
+            'center',
+            'center'
+          );
+          target.setCoords();
+        }
+
+        canvas.renderAll();
+        sendSelectionUpdate();
+      }
+
+      // =====================
+      // HISTORY
+      // =====================
+
+      function saveHistory() {
+        const json = canvas.toJSON(['objectId', 'isFrame', 'frameName']);
+        if (historyIndex < historyStack.length - 1) historyStack = historyStack.slice(0, historyIndex + 1);
+        historyStack.push(json);
+        if (historyStack.length > MAX_HISTORY) historyStack.shift();
+        else historyIndex++;
+        sendHistoryState();
+      }
+
+      function undo() { 
+        if (historyIndex > 0) { 
+          historyIndex--; 
+          loadHistory(); 
+        } 
+      }
+
+      function redo() { 
+        if (historyIndex < historyStack.length - 1) { 
+          historyIndex++; 
+          loadHistory(); 
+        } 
+      }
+
+      function loadHistory() {
+        const state = historyStack[historyIndex];
+        if (!state) return;
+        canvas.loadFromJSON(state, () => {
+          backgroundRect = canvas.getObjects().find(o => o.objectId === 'background_layer') || null;
+          canvas.renderAll();
+          sendHistoryState();
+          sendToRN({ type: 'SELECTION_CLEARED' });
+        });
+      }
+
+      function sendHistoryState() {
+        sendToRN({ type: 'HISTORY_STATE', payload: { canUndo: historyIndex > 0, canRedo: historyIndex < historyStack.length - 1 } });
+      }
+
+      // =====================
+      // EXPORT
+      // =====================
+
+      function exportCanvas(format, quality = 1, multiplier = 2) {
+        try {
+          if (format === 'svg') {
+            sendToRN({ type: 'EXPORT_COMPLETE', payload: { format: 'svg', data: canvas.toSVG() } });
+            return;
+          }
+          const dataUrl = canvas.toDataURL({ format: format === 'jpeg' ? 'jpeg' : 'png', quality, multiplier });
+          sendToRN({ type: 'EXPORT_COMPLETE', payload: { format, data: dataUrl } });
+        } catch (e) {
+          sendToRN({ type: 'EXPORT_ERROR', payload: { error: e.message } });
+        }
+      }
+
+      // =====================
+      // LAYERS
+      // =====================
+
+      function getLayerName(obj) {
+        if (obj.isFrame) return obj.frameName || 'Frame';
+        if (obj.type === 'i-text' || obj.type === 'text' || obj.type === 'textbox') {
+          return obj.text ? obj.text.substring(0, 20) : 'Text';
+        }
+        if (obj.type === 'rect' || obj.type === 'rectangle') return 'Rectangle';
+        if (obj.type === 'circle') return 'Circle';
+        if (obj.type === 'triangle') return 'Triangle';
+        if (obj.type === 'line') return 'Line';
+        if (obj.type === 'ellipse') return 'Ellipse';
+        if (obj.type === 'polygon') return 'Polygon';
+        if (obj.type === 'group') return 'Group';
+        if (obj.type === 'image') return 'Image';
+        if (obj.type === 'path') return 'Path';
+        return obj.type || 'Layer';
+      }
+
+      function getLayers() {
+        const allObjects = canvas.getObjects().filter(o => o.objectId !== 'background_layer');
+        const layers = allObjects
+          .map((obj, i) => ({ 
+            id: obj.objectId || ('layer_' + i), 
+            type: obj.type, 
+            name: getLayerName(obj),
+            visible: obj.visible !== false, 
+            locked: !obj.selectable, 
+            index: allObjects.length - i - 1,
+            isFrame: obj.isFrame || false,
+          }))
+          .reverse();
+        sendToRN({ type: 'LAYERS_LIST', payload: { layers } });
+      }
+
+      function setLayerVisibility(id, visible) {
+        const obj = canvas.getObjects().find(o => o.objectId === id);
+        if (obj) { 
+          obj.set('visible', visible); 
+          canvas.renderAll(); 
+          saveHistory(); 
+        }
+      }
+
+      function setLayerLock(id, locked) {
+        const obj = canvas.getObjects().find(o => o.objectId === id);
+        if (obj && obj.objectId !== 'background_layer') {
+          obj.set({ selectable: !locked, evented: !locked });
+          canvas.renderAll();
+          saveHistory();
+        }
+      }
+
+      function selectLayer(id) {
+        const obj = canvas.getObjects().find(o => o.objectId === id);
+        if (obj && obj.selectable) { 
+          canvas.setActiveObject(obj); 
+          canvas.renderAll(); 
+        }
+      }
+
+      // =====================
+      // SELECTION
+      // =====================
+
+      function handleSelection(e) {
+        const sel = e.selected[0];
+        if (sel && sel.objectId !== 'background_layer') {
+          sendToRN({ type: 'SELECTION_CHANGED', payload: getObjectInfo(sel) });
+        }
+      }
+
+      function sendSelectionUpdate() {
+        const obj = canvas.getActiveObject();
+        if (obj && obj.objectId !== 'background_layer') {
+          sendToRN({ type: 'SELECTION_CHANGED', payload: getObjectInfo(obj) });
+        }
+      }
+
+      function getObjectInfo(obj) {
+        return {
+          objectId: obj.objectId, 
+          type: obj.type,
+          left: Math.round(obj.left), 
+          top: Math.round(obj.top),
+          width: Math.round(obj.width * (obj.scaleX || 1)),
+          height: Math.round(obj.height * (obj.scaleY || 1)),
+          scaleX: obj.scaleX || 1,
+          scaleY: obj.scaleY || 1,
+          angle: Math.round(obj.angle || 0),
+          fill: obj.fill, 
+          stroke: obj.stroke, 
+          strokeWidth: obj.strokeWidth, 
+          opacity: obj.opacity,
+          text: obj.text, 
+          fontSize: obj.fontSize, 
+          fontFamily: obj.fontFamily, 
+          fontWeight: obj.fontWeight,
+          rx: obj.rx,
+          ry: obj.ry,
+          isFrame: obj.isFrame || false,
+          frameName: obj.frameName,
+          visible: obj.visible !== false,
+          locked: !obj.selectable,
+        };
+      }
+
+      // =====================
+      // PAGES
+      // =====================
+
+      function saveCurrentPage() {
+        if (currentPageIndex >= 0 && currentPageIndex < pages.length) {
+          pages[currentPageIndex].objects = canvas.toJSON(['objectId', 'isFrame', 'frameName']);
+        }
+      }
+
+      function loadPage(pageIndex) {
+        if (pageIndex < 0 || pageIndex >= pages.length) return;
+        
+        saveCurrentPage();
+        currentPageIndex = pageIndex;
+        
+        const page = pages[pageIndex];
+        if (page.objects && Object.keys(page.objects).length > 0) {
+          canvas.loadFromJSON(page.objects, () => {
+            backgroundRect = canvas.getObjects().find(o => o.objectId === 'background_layer') || null;
+            canvas.renderAll();
+            sendToRN({ type: 'PAGE_LOADED', payload: { pageIndex, pageName: page.name } });
+          });
+        } else {
+          clearCanvas();
+          createBackground('#ffffff');
+          sendToRN({ type: 'PAGE_LOADED', payload: { pageIndex, pageName: page.name } });
+        }
+      }
+
+      function addPage(name) {
+        saveCurrentPage();
+        const newPage = {
+          id: 'page_' + Date.now(),
+          name: name || 'Page ' + (pages.length + 1),
+          objects: [],
+        };
+        pages.push(newPage);
+        sendToRN({ type: 'PAGES_LIST', payload: { pages: pages.map(p => ({ id: p.id, name: p.name })), currentPage: currentPageIndex } });
+        return newPage.id;
+      }
+
+      function deletePage(pageIndex) {
+        if (pages.length <= 1) return; // Don't delete last page
+        if (pageIndex < 0 || pageIndex >= pages.length) return;
+        
+        pages.splice(pageIndex, 1);
+        
+        if (currentPageIndex >= pages.length) {
+          currentPageIndex = pages.length - 1;
+        }
+        
+        loadPage(currentPageIndex);
+        sendToRN({ type: 'PAGES_LIST', payload: { pages: pages.map(p => ({ id: p.id, name: p.name })), currentPage: currentPageIndex } });
+      }
+
+      function renamePage(pageIndex, newName) {
+        if (pageIndex < 0 || pageIndex >= pages.length) return;
+        pages[pageIndex].name = newName;
+        sendToRN({ type: 'PAGES_LIST', payload: { pages: pages.map(p => ({ id: p.id, name: p.name })), currentPage: currentPageIndex } });
+      }
+
+      function getPages() {
+        sendToRN({ type: 'PAGES_LIST', payload: { pages: pages.map(p => ({ id: p.id, name: p.name })), currentPage: currentPageIndex } });
+      }
+
+      // =====================
+      // THEME
+      // =====================
+
+      function setTheme(dark) {
+        if (dark) {
+          document.body.classList.remove('light-theme');
+        } else {
+          document.body.classList.add('light-theme');
+        }
+      }
+
+      // =====================
+      // COMMUNICATION
+      // =====================
+
+      function sendToRN(msg) {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+        } else {
+          console.log('RN Message:', msg);
+        }
+      }
+
+      window.handleRNMessage = function(message) {
+        let type, payload;
+        try {
+          const parsed = typeof message === 'string' ? JSON.parse(message) : message;
+          type = parsed.type;
+          payload = parsed.payload;
+          
+          if (!type) {
+            console.warn('Message missing type:', parsed);
+            return;
+          }
+          
+          switch (type) {
+            // Shapes
+            case 'ADD_SHAPE': addShape(payload.shape, payload.options); break;
+            case 'ADD_TEXT': addText(payload.text, payload.options); break;
+            case 'ADD_SVG': addSVG(payload.svg); break;
+            case 'ADD_IMAGE': addImage(payload.dataUrl, payload.options); break;
+            
+            // Frames
+            case 'ADD_FRAME': addFrame(payload); break;
+            case 'ADD_FRAME_PRESET': addFrameFromPreset(payload.preset); break;
+            
+            // Updates
+            case 'UPDATE_OBJECT': updateSelectedObject(payload.property, payload.value); break;
+            case 'NUDGE_POSITION': nudgePosition(payload.deltaX || 0, payload.deltaY || 0); break;
+            case 'SET_SCALE': setScale(payload.scaleX || 1, payload.scaleY); break;
+            case 'ROTATE_OBJECT': rotateObject(payload.angleDelta || 0); break;
+            
+            // Zoom
+            case 'SET_ZOOM': setCanvasZoom(payload.zoom); break;
+            case 'ZOOM_IN': zoomIn(payload?.step); break;
+            case 'ZOOM_OUT': zoomOut(payload?.step); break;
+            
+            // Alignment
+            case 'ALIGN_CENTER_H': alignCenterHorizontal(); break;
+            case 'ALIGN_CENTER_V': alignCenterVertical(); break;
+            case 'ALIGN_LEFT': alignLeft(); break;
+            case 'ALIGN_RIGHT': alignRight(); break;
+            case 'ALIGN_TOP': alignTop(); break;
+            case 'ALIGN_BOTTOM': alignBottom(); break;
+            
+            // Layer operations
+            case 'DELETE_SELECTED': deleteSelected(); break;
+            case 'DUPLICATE_SELECTED': duplicateSelected(); break;
+            case 'GROUP_SELECTED': groupSelected(); break;
+            case 'UNGROUP_SELECTED': ungroupSelected(); break;
+            case 'BRING_FORWARD': bringForward(); break;
+            case 'SEND_BACKWARD': sendBackward(); break;
+            case 'BRING_TO_FRONT': bringToFront(); break;
+            case 'SEND_TO_BACK': sendToBack(); break;
+            case 'LOCK_OBJECT': lockObject(payload.lock); break;
+            case 'SET_VISIBILITY': setObjectVisibility(payload.visible); break;
+            
+            // Background
+            case 'SET_BACKGROUND': createBackground(payload.color); saveHistory(); break;
+            
+            // History
+            case 'UNDO': undo(); break;
+            case 'REDO': redo(); break;
+            
+            // Export
+            case 'EXPORT': exportCanvas(payload.format, payload.quality, payload.multiplier); break;
+            
+            // Canvas
+            case 'CLEAR_CANVAS': clearCanvas(); break;
+            
+            // Layers
+            case 'GET_LAYERS': getLayers(); break;
+            case 'SET_LAYER_VISIBILITY': setLayerVisibility(payload.objectId, payload.visible); break;
+            case 'SET_LAYER_LOCK': setLayerLock(payload.objectId, payload.locked); break;
+            case 'SELECT_LAYER': selectLayer(payload.objectId); break;
+            
+            // Drawing
+            case 'DRAW_TOOL_ACTIVATE': activateDrawTool(); break;
+            case 'DRAW_TOOL_DEACTIVATE': deactivateDrawTool(); break;
+            case 'DRAW_TOOL_SET_COLOR': setDrawToolColor(payload?.color || '#000000'); break;
+            case 'DRAW_TOOL_SET_WIDTH': setDrawToolWidth(payload?.width || 5); break;
+            
+            // Grid & Snap
+            case 'TOGGLE_GRID': toggleGrid(payload.show); break;
+            case 'TOGGLE_SNAP': toggleSnapToGrid(payload.snap); break;
+            case 'SET_GRID_SIZE': setGridSize(payload.size); break;
+            
+            // Pages
+            case 'GET_PAGES': getPages(); break;
+            case 'ADD_PAGE': addPage(payload?.name); break;
+            case 'DELETE_PAGE': deletePage(payload.pageIndex); break;
+            case 'LOAD_PAGE': loadPage(payload.pageIndex); break;
+            case 'RENAME_PAGE': renamePage(payload.pageIndex, payload.name); break;
+            
+            // Theme
+            case 'SET_THEME': setTheme(payload.dark); break;
+            case 'DESELECT': canvas.discardActiveObject(); canvas.renderAll(); break;
+            
+            default: console.warn('Unknown message type:', type);
+          }
+        } catch(e) {
+          console.error('Error handling message:', type || 'unknown', message, e);
+        }
+      };
+
+      // Initialize after fonts are loaded
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          preloadFonts().then(() => {
+            updateStatus('Fonts loaded, initializing canvas...');
+            initCanvas();
+          });
+        });
+      } else {
+        preloadFonts().then(() => {
+          updateStatus('Fonts loaded, initializing canvas...');
+          initCanvas();
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
+
